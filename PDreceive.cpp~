@@ -1,0 +1,119 @@
+#include "PDreceive.hpp"
+#include <unistd.h>
+#include <sstream>
+#include <iomanip>
+#include <Common/Helper/iqrUtils.h>
+
+#define DRIVER       "QMYSQL3"  /* see the Qt SQL documentation for a list of available drivers */
+//#define DEBUG_MODULEDBACCESS
+
+MAKE_MODULE_DLL_INTERFACE(iqrcommon::PDreceive,
+			  "PDreceive Module")
+   
+    iqrcommon::PDreceive::PDreceive():ClsThreadModule() {
+    tid = 0;
+
+    clsIntParameterPort = addIntParameter("Port", /* _strName */
+					       "Port",  /* _strLabel */
+					       11979, /* _iValue */
+					       1, /* _iMinimum */
+					       100000, /* _iMaximum */
+					       "Port" /* _strDescription */,
+					       "Host" /* _strCategory */);
+
+    output1StateVariable = addOutputToGroup("Pitch", "Pitch");
+    output2StateVariable = addOutputToGroup("Enveloppe","Enveloppe");
+    output3StateVariable = addOutputToGroup("Onset","Onset");
+}
+
+iqrcommon::PDreceive::~PDreceive(){ 
+#ifdef DEBUG_MODULEDBACCESS
+    cout << "PDreceive::~PDreceive()" << endl;
+#endif
+}
+
+void iqrcommon::PDreceive::init(){
+#ifdef DEBUG_MODULEDBACCESS
+    cout << "PDreceive::init()" << endl;
+#endif
+
+    iPort = clsIntParameterPort->getValue();
+    cout<<"Get data from PD on port number:"<<iPort<<endl;
+    if(iPort <= 0){
+	throw ModuleError(string("Module \"") + label() + "\": Invalid port number");
+    }
+
+    iNrCells = output1StateVariable->getStateArray().getWidth();
+    cout<<"number of cells "<<iNrCells<<endl;
+
+    QSocketDevice::Error error;
+    qs = new QSocketDevice (QSocketDevice::Datagram);
+    error = qs->error(); 
+    qs->setBlocking(false);
+    error = qs->error(); 
+	
+    bool bound = qs->bind(QHostAddress()/*qa*/, iPort);
+    error = qs->error(); 
+}
+
+void iqrcommon::PDreceive::update(){
+//    cerr << "PDreceive::update()" << endl;
+
+
+#define BUFF_LEN 1024
+    char acData[BUFF_LEN];
+    bzero(acData, BUFF_LEN);
+    qs->readBlock ( acData, BUFF_LEN ) ;
+    //cout << "read: " << acData << "|" << endl;
+
+    std::stringstream ssResponse;
+//    ssResponse.str(acData);
+    ssResponse << acData;
+    float pitch;
+    float enveloppe;
+    float onset;
+    char rest;
+    ssResponse>>pitch>>enveloppe>>onset>>rest;
+    cout<<"pitch: "<<pitch<<" enveloppe: " <<enveloppe<<" onset: "<<onset<<endl;
+    qmutexThread->lock(); 
+
+    StateArray &clsStateArrayOut1 = output1StateVariable->getStateArray();
+    StateArray &clsStateArrayOut2 = output2StateVariable->getStateArray();
+    StateArray &clsStateArrayOut3 = output3StateVariable->getStateArray();
+    
+//    stateArrayOut[0] = 0;
+
+    //cout << pitch << " " << enveloppe << " " << onset << endl;
+
+
+
+    for (unsigned int ii=0;ii<clsStateArrayOut1.getWidth();ii++){
+	clsStateArrayOut1[0][ii]=pitch; 
+    } 
+
+
+    for (unsigned int ii=0;ii<clsStateArrayOut2.getWidth();ii++){
+	clsStateArrayOut2[0][ii]=enveloppe;
+    }
+    for (unsigned int ii=0;ii<clsStateArrayOut3.getWidth();ii++){
+	clsStateArrayOut3[0][ii]=onset;
+    }
+    
+    /* bool bLoop = true;
+    while(bLoop) {
+	    if(iIndex<iNrCells){
+	    stateArrayOut[0][iIndex ] = 1.0;
+	}
+	
+	if(ssResponse.peek()<=0){ 
+	    bLoop = false; 
+	}
+	}*/
+
+    qmutexThread->unlock(); 
+    usleep(50); 
+}
+
+void iqrcommon::PDreceive::cleanup(){
+    qs->close();
+}
